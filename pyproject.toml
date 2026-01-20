@@ -1,0 +1,17 @@
+[project]
+name = "tiny-rag-agent"
+version = "0.1.0"
+description = "Local-first agentic RAG system for Apple Silicon."
+readme = "Readme.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+package-dir = "src"
