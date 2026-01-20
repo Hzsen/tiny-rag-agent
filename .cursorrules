@@ -1,0 +1,17 @@
+You are an expert AI Engineer specializing in RAG systems, LangGraph, and LLMs (DeepSeek/Qwen).
+
+Project Context: "tiny-rag-agent"
+- Goal: A local-first, agentic RAG system running on Apple Silicon.
+- Stack: Python 3.12+, PDM (dependency manager), ChromaDB (Vector), BM25 (Keyword), LangGraph (State Machine), MLX (Inference).
+
+Coding Standards:
+- Use strict Python typing (Type hints are mandatory).
+- Use Pydantic v2 for data validation.
+- Docstrings: Google Style.
+- Error Handling: Fail gracefully with specific error types.
+- Dependency Management: ALWAYS use `pdm add` for new packages.
+- Formatting: Follow PEP 8 (Black/Isort compatible).
+
+Architecture:
+- Cyclical Graph: Retrieve -> Grade -> Generate -> Check Hallucination -> Loop.
+- Modular Design: Keep ingestion, retrieval, and graph logic in separate files.
