@@ -27,3 +27,4 @@ package-dir = "src"
 
 [tool.pdm.scripts]
 check-installation = "python scripts/check_env.py"
+main = "python -m tiny_rag_agent.cli.main"

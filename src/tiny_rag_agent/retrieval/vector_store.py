@@ -13,24 +13,34 @@ from tiny_rag_agent.ingestion.schema import DocumentChunk
 
 @dataclass(frozen=True)
 class _EmbeddingConfig:
+    """Embedding configuration used by the vector store."""
+
     model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     dimensions: int = 384
 
 
 class _SimpleEmbeddingFunction:
-    """Lightweight, deterministic embedding for local fallback."""
+    """Lightweight, deterministic embedding for local fallback.
+
+    This is not a semantic embedding. It is a simple hashed bag-of-words vector
+    so that ChromaDB can still run without a heavy model download.
+    """
 
     def __init__(self, dimensions: int) -> None:
         self._dimensions = dimensions
 
     def __call__(self, texts: Iterable[str]) -> List[List[float]]:
+        """Convert a list of texts into normalized dense vectors."""
         embeddings: List[List[float]] = []
         for text in texts:
+            # Start with an all-zero vector.
             vector = [0.0] * self._dimensions
+            # Hash each token to a bucket and count occurrences.
             for token in text.lower().split():
                 digest = hashlib.md5(token.encode("utf-8")).hexdigest()
                 index = int(digest, 16) % self._dimensions
                 vector[index] += 1.0
+            # Normalize to unit length so distance behaves more consistently.
             norm = math.sqrt(sum(value * value for value in vector)) or 1.0
             embeddings.append([value / norm for value in vector])
         return embeddings
@@ -45,13 +55,16 @@ class VectorStore:
         persist_directory: str = "chroma_db",
     ) -> None:
         self._embedding_config = _EmbeddingConfig()
+        # Create a local Chroma client that stores data on disk.
         self._client = self._init_client(persist_directory)
+        # Create (or reuse) a collection to hold our embeddings.
         self._collection = self._client.get_or_create_collection(
             name=collection_name,
             embedding_function=self._build_embedding_function(),
         )
 
     def _init_client(self, persist_directory: str):
+        """Create a persistent ChromaDB client or fail with a clear error."""
         try:
             import chromadb
         except ImportError as exc:  # pragma: no cover - import guard
@@ -62,6 +75,7 @@ class VectorStore:
         return chromadb.PersistentClient(path=persist_directory)
 
     def _build_embedding_function(self):
+        """Use a sentence-transformer if available; otherwise use fallback."""
         try:
             from chromadb.utils import embedding_functions
 
@@ -80,8 +94,10 @@ class VectorStore:
         documents: List[str] = []
         metadatas: List[dict[str, object]] = []
         for chunk in chunks:
+            # IDs are required by ChromaDB; we use chunk_id for stability.
             ids.append(chunk.chunk_id)
             documents.append(chunk.text)
+            # Store key fields as metadata for reconstruction later.
             metadata: dict[str, object] = {
                 "doc_id": chunk.doc_id,
                 "chunk_id": chunk.chunk_id,
@@ -90,6 +106,7 @@ class VectorStore:
             if chunk.page is not None:
                 metadata["page"] = chunk.page
             if chunk.metadata is not None:
+                # Store extra metadata as JSON to keep a flat schema.
                 metadata["metadata_json"] = json.dumps(chunk.metadata)
             metadatas.append(metadata)
 
@@ -100,6 +117,7 @@ class VectorStore:
         if top_k <= 0:
             return []
 
+        # Chroma returns lists for each query; we send only one query.
         results = self._collection.query(
             query_texts=[query_text],
             n_results=top_k,
@@ -116,6 +134,7 @@ class VectorStore:
             parsed_metadata = (
                 json.loads(metadata_json) if isinstance(metadata_json, str) else None
             )
+            # Rebuild a DocumentChunk from stored metadata + text.
             chunks.append(
                 DocumentChunk(
                     doc_id=str(metadata.get("doc_id", "")),
