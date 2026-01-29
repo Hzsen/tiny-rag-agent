@@ -154,6 +154,90 @@ class CloudChatModel(BaseChatModel):
         return (choice.message.content or "").strip()
 
 
+class DeepseekChatModel(BaseChatModel):
+    """DeepSeek-backed chat model via OpenAI-compatible API."""
+
+    model_name: str = Field(default="deepseek-chat")
+    temperature: float = Field(default=0.0)
+    _client: OpenAI = PrivateAttr()
+
+    def __init__(self, **data: object) -> None:
+        super().__init__(**data)
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("Missing required environment variable: DEEPSEEK_API_KEY")
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
+
+    @property
+    def _llm_type(self) -> str:
+        return "deepseek"
+
+    def _generate(  # type: ignore[override]
+        self,
+        messages: Sequence[BaseMessage],
+        stop: Iterable[str] | None = None,
+        run_manager=None,
+        **kwargs: object,
+    ) -> ChatResult:
+        content = self._call_deepseek(messages)
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])
+
+    def with_structured_output(  # type: ignore[override]
+        self,
+        schema: dict | type,
+        *,
+        include_raw: bool = False,
+        **kwargs: object,
+    ) -> Runnable[object, BaseModel | dict]:
+        if kwargs:
+            raise ValueError(f"Unsupported arguments: {sorted(kwargs)}")
+
+        def _structured(input_data: object) -> BaseModel | dict:
+            messages = _normalize_messages(input_data)
+            schema_prompt = _schema_prompt(schema)
+            messages = [SystemMessage(content=schema_prompt), *messages]
+            content = self._call_deepseek(messages, json_mode=True)
+            payload = json.loads(content)
+            if isinstance(schema, type) and issubclass(schema, BaseModel):
+                return schema.model_validate(payload)
+            return payload
+
+        def _structured_with_raw(input_data: object) -> dict:
+            messages = _normalize_messages(input_data)
+            schema_prompt = _schema_prompt(schema)
+            messages = [SystemMessage(content=schema_prompt), *messages]
+            content = self._call_deepseek(messages, json_mode=True)
+            payload = json.loads(content)
+            if isinstance(schema, type) and issubclass(schema, BaseModel):
+                parsed = schema.model_validate(payload)
+            else:
+                parsed = payload
+            return {
+                "raw": AIMessage(content=content),
+                "parsed": parsed,
+                "parsing_error": None,
+            }
+
+        return RunnableLambda(_structured_with_raw if include_raw else _structured)
+
+    def _call_deepseek(
+        self,
+        messages: Sequence[BaseMessage],
+        json_mode: bool = False,
+    ) -> str:
+        openai_messages = [_message_to_openai(message) for message in messages]
+        response_format = {"type": "json_object"} if json_mode else None
+        response = self._client.chat.completions.create(
+            model=self.model_name,
+            temperature=self.temperature,
+            messages=openai_messages,
+            response_format=response_format,
+        )
+        choice = response.choices[0]
+        return (choice.message.content or "").strip()
+
+
 def _heuristic_response(messages: Sequence[BaseMessage]) -> str:
     """Return a deterministic response based on prompt content."""
     if not messages:
@@ -217,7 +301,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="tiny-rag-agent CLI")
     parser.add_argument(
         "--mode",
-        choices=["local", "cloud"],
+        choices=["local", "cloud", "deepseek"],
         default="local",
         help="Execution mode (local or cloud).",
     )
@@ -361,6 +445,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.mode == "cloud":
         model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         llm = CloudChatModel(model_name=model_name)
+    elif args.mode == "deepseek":
+        model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        llm = DeepseekChatModel(model_name=model_name)
     else:
         llm = LocalHeuristicChatModel()
     generate_chain = _build_generate_chain(llm)

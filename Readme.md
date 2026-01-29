@@ -95,6 +95,26 @@ pdm run main --mode local
 
 ```
 
+To run with OpenAI (cloud mode):
+
+```bash
+OPENAI_API_KEY=... pdm run main --mode cloud
+
+```
+
+To run with DeepSeek (OpenAI-compatible API):
+
+```bash
+DEEPSEEK_API_KEY=... pdm run main --mode deepseek
+
+```
+
+DeepSeek environment variables:
+
+- `DEEPSEEK_API_KEY`: required
+- `DEEPSEEK_MODEL`: optional, default `deepseek-chat`
+- `DEEPSEEK_BASE_URL`: optional, default `https://api.deepseek.com`
+
 ## Walkthrough (File + Function Guide)
 
 This section explains each module and function in the tiny-rag-agent codebase.
@@ -153,6 +173,31 @@ If you are new to RAG, read this in order: ingestion -> retrieval -> graph -> CL
 - `CloudChatModel._call_openai(...)`:
 
   -  Low-level call to OpenAI chat completions.
+  -  Centralizes request/response formatting.
+  -  Maps LangChain messages to OpenAI format and strips output text.
+- `DeepseekChatModel`:
+
+  -  DeepSeek chat model using an OpenAI-compatible API.
+  -  Adds a cloud option without changing the rest of the pipeline.
+  -  Uses `DEEPSEEK_API_KEY` and `DEEPSEEK_BASE_URL` for authentication.
+- `DeepseekChatModel._llm_type()`:
+
+  -  Declares the model type string.
+  -  Required by LangChain `BaseChatModel`.
+  -  Returns `"deepseek"`.
+- `DeepseekChatModel._generate(...)`:
+
+  -  Generates text from messages using DeepSeek.
+  -  Primary LLM call for chat completions in DeepSeek mode.
+  -  Calls `_call_deepseek()` and wraps the content in an `AIMessage`.
+- `DeepseekChatModel.with_structured_output(...)`:
+
+  -  Produces a runnable that returns structured JSON outputs.
+  -  Graders expect strict JSON to validate with Pydantic.
+  -  Builds a schema prompt, asks the model in JSON mode, parses to model.
+- `DeepseekChatModel._call_deepseek(...)`:
+
+  -  Low-level call to DeepSeek chat completions.
   -  Centralizes request/response formatting.
   -  Maps LangChain messages to OpenAI format and strips output text.
 - `_heuristic_response(...)`:
